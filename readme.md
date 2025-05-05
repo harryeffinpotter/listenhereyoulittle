@@ -31,8 +31,8 @@ iwr -UseBasicParsing https://raw.githubusercontent.com/harryeffinpotter/listenhe
 
 ### Option 2 (Backup)
 
-1. Download `init.ps1` and `run-init.bat` from the repo.
-2. Right-click and **Run as administrator** (or double-click `run-init.bat`).
+1. Download `init.ps1` and `install.bat` from the repo.
+2. Double-click `install.bat`.
 3. Follow the on-screen prompts.
 
 Both options will:
