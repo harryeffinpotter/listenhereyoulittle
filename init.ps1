@@ -1,8 +1,20 @@
 # init.ps1
-# Run via iex (Invoke-Expression) to install and configure automatic audio fixing.
 param()
 $ErrorActionPreference = 'Stop'
 
+function Test-IsAdmin {
+  $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+  return (New-Object Security.Principal.WindowsPrincipal($id))
+         .IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+if (-not (Test-IsAdmin)) {
+  Start-Process PowerShell.exe `
+    -ArgumentList "-NoProfile -NoExit -ExecutionPolicy Bypass -File `"$PSCommandPath`"" `
+    -Verb RunAs -Wait
+  exit
+}
+# Run via iex (Invoke-Expression) to install and configure automatic audio fixing.
 # ---------- Paths ----------
 $basePath       = Join-Path $env:APPDATA 'listenhereyoulittle'
 if (-not (Test-Path $basePath)) {
@@ -273,3 +285,4 @@ if ($installWatcher) {
 
 # ---------- Summary ----------
 Write-Host "Setup complete. Shortcuts placed in Start Menu > Programs > ListenHereYouLittle"
+pause
