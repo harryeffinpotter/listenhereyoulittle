@@ -26,7 +26,7 @@ A PowerShell toolkit to enforce and maintain your preferred audio devices on Win
 Copy and paste into a PowerShell window, press Enter, then follow the on-screen prompts:
 
 ```powershell
-iwr -UseBasicParsing https://raw.githack.com/harryeffinpotter/listenhereyoulittle/master/init.ps1 | iex
+iwr -UseBasicParsing https://raw.githubusercontent.com/harryeffinpotter/listenhereyoulittle/refs/heads/master/init.ps1 | iex
 ```
 
 ### Option 2 (Backup)
