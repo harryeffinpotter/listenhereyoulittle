@@ -13,7 +13,7 @@ A PowerShell toolkit to enforce and maintain your preferred audio devices on Win
 * **watch.ps1**: Background watcher that re-applies preferences every 30 seconds.
 * **kill-watch.ps1**: Stops all running watcher processes.
 * **remove-task.ps1**: Unregisters the scheduled watcher task (requires elevation).
-* **run-init.bat**: Self-elevating batch wrapper to launch `init.ps1`.
+* **install.bat**: Self-elevating batch wrapper to launch `init.ps1`.
 
 ---
 
@@ -35,12 +35,11 @@ iwr -UseBasicParsing https://raw.githubusercontent.com/harryeffinpotter/listenhe
 2. Double-click `install.bat`.
 3. Follow the on-screen prompts.
 
-Both options will:
+**Both options will**:
 
 1. Prompt for your preferences.
-2. Elevate to administrator when scheduling the watcher.
-3. Install and configure all scripts under `%APPDATA%\listenhereyoulittle`.
-4. Create Start Menu shortcuts (see below).
+2. Install and configure all scripts under `%APPDATA%\listenhereyoulittle`.
+3. Create Start Menu shortcuts (see below).
 
 ---
 
@@ -51,7 +50,7 @@ All shortcuts are placed in **Start Menu → Programs → ListenHereYouLittle**:
 * **Fix Audio**: Apply your selected devices immediately.
 * **Watch Audio**: Launch the 30-second background watcher (runs hidden).
 * **Kill Watcher**: Stop any running `watch.ps1` instances.
-* **Remove Scheduled Task**: Unregister the automatic watcher task (only if you chose to install it).
+* **Remove from startup**: Remove the automatic watcher startup link (only if you chose to install it).
 
 You can also run each script directly from `%APPDATA%\listenhereyoulittle`:
 
