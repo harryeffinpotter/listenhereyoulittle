@@ -245,3 +245,4 @@ if ($installWatcher) {
 
 # ---------- Summary ----------
 Write-Host "Setup complete. Shortcuts placed in Start Menu > Programs > ListenHereYouLittle"
+pause
