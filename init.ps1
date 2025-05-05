@@ -39,18 +39,38 @@ function Ask-YesNo($prompt) {
     return $r -match '^[yY]$'
 }
 
-function Select-Device($devices, $type) {
-    Write-Host "`nSelect $type device:`n"
-    for ($i=0; $i -lt $devices.Count; $i++) {
-        $d = $devices[$i]
-        Write-Host "[$i] $($d.'Device Name') - $($d.'Command-Line Friendly ID')"
-    }
-    do {
-        $index = Read-Host "Enter index (0-$($devices.Count - 1))"
-    } while ($index -notmatch '^[0-9]+$' -or [int]$index -ge $devices.Count)
-    return $devices[[int]$index].'Command-Line Friendly ID'
-}
+function Select-Device {
+    param(
+        [array]$devices,
+        [string]$type
+    )
 
+    # 1) No devices → skip
+    if ($devices.Count -eq 0) {
+        Write-Host "⚠ No $type devices found; skipping selection."
+        return $null
+    }
+
+    # 2) Exactly one → auto-pick
+	if ($devices.Count -eq 1) {
+		$d = $devices[0]
+		# format {0}=type, {1}=device name
+		Write-Host "$($d.'Device Name') - $($d.'Command-Line Friendly ID') "
+		return $d['Command-Line Friendly ID']
+	}
+    # 3) Multiple → list and prompt
+    Write-Host "`nSelect $type device:`n"
+    for ($i = 0; $i -lt $devices.Count; $i++) {
+        $d = $devices[$i]
+        Write-Host "[$i] $($d.'Device Name')  - $($d.'Command-Line Friendly ID')"
+    }
+
+    do {
+        $idx = Read-Host -Prompt ("Enter index (0-$($devices.Count - 1))")
+    } while ($idx -notmatch '^[0-9]+$' -or [int]$idx -ge $devices.Count)
+
+    return $devices[[int]$idx].'Command-Line Friendly ID'
+}
 # ---------- Gather Preferences ----------
 $allDevices     = & "$svvExe" /sjson | ConvertFrom-Json
 $outputs        = $allDevices | Where-Object { $_.Direction -eq 'Render'  -and $_.Type -eq 'Device' }
@@ -59,7 +79,7 @@ $prefOut        = Select-Device $outputs 'output'
 $prefIn         = Select-Device $inputs  'input'
 $forceComm      = Ask-YesNo 'Also force default communication device?'
 $disableCtl     = Ask-YesNo 'Disable Wireless Controller devices?'
-$installWatcher = Ask-YesNo 'Install lightweight background watcher (runs every 30s) to auto-fix audio if your preferred device gets disabled?'
+$installWatcher = Ask-YesNo 'Install lightweight background watcher (runs every 30s) to auto-fix audio if your preferred device gets disabled? This will start with windows.'
 $nuclearOption  = Ask-YesNo 'Enable NUCLEAR option: disable ALL audio devices except your selected input/output?'
 
 # Save preferences
@@ -71,19 +91,6 @@ $nuclearOption  = Ask-YesNo 'Enable NUCLEAR option: disable ALL audio devices ex
     install_watcher             = $installWatcher
     nuclear_mode                = $nuclearOption
 } | ConvertTo-Json -Depth 3 | Set-Content -Encoding UTF8 $configPath
-
-# ---------- Self-elevation for task creation ----------
-function Test-IsAdmin {
-    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-    (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-if ($installWatcher -and -not (Test-IsAdmin)) {
-    Write-Host 'Scheduling your background watcher requires admin rights.'
-    Write-Host 'Relaunching elevated…'
-    $cmd = "-NoProfile -ExecutionPolicy Bypass -File `"$MyInvocation.MyCommand.Path`""
-    Start-Process powershell.exe -Verb RunAs -ArgumentList $cmd
-    exit
-}
 
 # ---------- Create fix.ps1 (single-shot) ----------
 $fixTemplate = @'
@@ -170,6 +177,21 @@ while ($true) {
 }
 '@
 $watchTemplate | Set-Content -Encoding UTF8 $watchScript
+# Path to your watcher ps1
+
+$vbsPath = Join-Path $env:APPDATA 'listenhereyoulittle\watch.vbs'
+# Literal here-string (no interpolation yet), with a {0} placeholder
+$vbTemplate = @'
+Set objShell = CreateObject("Wscript.Shell")
+objShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{0}""", 0, False
+'@
+
+# Inject the actual watch.ps1 path into the placeholder
+$vbContent = $vbTemplate -f $watchScript
+
+# Write as ASCII so VBScript sees the exact quotes it needs
+[System.IO.File]::WriteAllText($vbsPath, $vbContent, [System.Text.Encoding]::ASCII)
+
 
 # ---------- Create kill-watch.ps1 (stop only processes) ----------
 $killTemplate = @'
@@ -185,34 +207,40 @@ $killTemplate | Set-Content -Encoding UTF8 $killScript
 # ---------- Create remove-task.ps1 (requires elevation) ----------
 $removeTemplate = @'
 param()
-function Test-IsAdmin {
-    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-    (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Stop'
+
+# Resolve the current user’s Startup folder
+$userStartup   = [Environment]::GetFolderPath('Startup')            # e.g. %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup :contentReference[oaicite:0]{index=0}
+$shortcutPath  = Join-Path $userStartup 'ListenHereYouLittleWatcher.lnk'
+
+if (Test-Path $shortcutPath) {
+    Remove-Item $shortcutPath -Force                              # Remove the .lnk file :contentReference[oaicite:1]{index=1}
+    Write-Host "✔ Removed startup shortcut at:`n  $shortcutPath"
+} else {
+    Write-Host "ℹ No startup shortcut found at:`n  $shortcutPath"
 }
-if (-not (Test-IsAdmin)) {
-    Write-Host 'Removing scheduled task requires admin rights.'
-    Write-Host 'Relaunching elevated…'
-    $cmd = "-NoProfile -ExecutionPolicy Bypass -File `"$MyInvocation.MyCommand.Path`""
-    Start-Process powershell.exe -Verb RunAs -ArgumentList $cmd
-    exit
-}
-Unregister-ScheduledTask -TaskName 'EnforcePreferredAudio' -Confirm:$false -ErrorAction SilentlyContinue
-Write-Host 'Scheduled task.EnforcePreferredAudio removed.'
 '@
 $removeTemplate | Set-Content -Encoding UTF8 $removeScript
 
-# ---------- Schedule watcher or shortcuts ----------
-$taskName = 'EnforcePreferredAudio'
+
+# ---------- Create Startup-folder shortcut for vbs wrapper ----------
 if ($installWatcher) {
-    $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$watchScript`""
-    $trigger  = New-ScheduledTaskTrigger -AtLogOn
-    $settings = New-ScheduledTaskSettingsSet -Hidden
-    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-        Set-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings
-    } else {
-        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Force
-    }
+    # Resolve per-user Startup folder (shell:startup)
+    $userStartup  = [Environment]::GetFolderPath('Startup')
+    $startupLink  = Join-Path $userStartup 'ListenHereYouLittleWatcher.lnk'
+    $wshell       = New-Object -ComObject WScript.Shell
+
+    # Build the shortcut
+    $lnk = $wshell.CreateShortcut($startupLink)
+    $lnk.TargetPath       = $vbsPath                # point at watch.vbs
+    $lnk.WorkingDirectory = Split-Path $vbsPath     # optional: "Start In" the basePath
+    $lnk.Save()
+
+    Write-Host "Startup shortcut created."
 }
+
+
 
 # ---------- Create shortcuts in Start Menu folder ----------
 $shell = New-Object -ComObject WScript.Shell
@@ -223,10 +251,10 @@ $linkFix.TargetPath = 'powershell.exe'
 $linkFix.Arguments  = "-NoProfile -ExecutionPolicy Bypass -File `"$fixScript`""
 $linkFix.Save()
 
-# Watch Audio shortcut (invisible)
+# Watch Audio → now launches the VBS wrapper
 $linkWatch = $shell.CreateShortcut((Join-Path $smFolder 'Watch Audio.lnk'))
-$linkWatch.TargetPath = 'powershell.exe'
-$linkWatch.Arguments  = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$watchScript`""
+$linkWatch.TargetPath       = $vbsPath
+$linkWatch.WorkingDirectory = Split-Path $watchScript
 $linkWatch.Save()
 
 # Kill Watcher shortcut
