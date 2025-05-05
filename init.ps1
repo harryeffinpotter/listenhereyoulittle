@@ -1,5 +1,5 @@
 # init.ps1
-# Run via `iex` (Invoke-Expression) to install and configure automatic audio fixing.
+# Run via iex (Invoke-Expression) to install and configure automatic audio fixing.
 param()
 $ErrorActionPreference = 'Stop'
 
@@ -12,6 +12,7 @@ $configPath     = Join-Path $basePath 'defaults.json'
 $fixScript      = Join-Path $basePath 'fix.ps1'
 $watchScript    = Join-Path $basePath 'watch.ps1'
 $killScript     = Join-Path $basePath 'kill-watch.ps1'
+$removeScript   = Join-Path $basePath 'remove-task.ps1'
 $svvZipUrl      = 'https://www.nirsoft.net/utils/soundvolumeview-x64.zip'
 $svvExe         = Join-Path $basePath 'soundvolumeview.exe'
 
@@ -58,7 +59,7 @@ $prefOut        = Select-Device $outputs 'output'
 $prefIn         = Select-Device $inputs  'input'
 $forceComm      = Ask-YesNo 'Also force default communication device?'
 $disableCtl     = Ask-YesNo 'Disable Wireless Controller devices?'
-$installWatcher = Ask-YesNo 'Install lightweight background watcher (runs every 30s) to auto-fix audio if your preferred device gets disabled? Recommended if you experience audio issues.'
+$installWatcher = Ask-YesNo 'Install lightweight background watcher (runs every 30s) to auto-fix audio if your preferred device gets disabled?'
 $nuclearOption  = Ask-YesNo 'Enable NUCLEAR option: disable ALL audio devices except your selected input/output?'
 
 # Save preferences
@@ -70,6 +71,19 @@ $nuclearOption  = Ask-YesNo 'Enable NUCLEAR option: disable ALL audio devices ex
     install_watcher             = $installWatcher
     nuclear_mode                = $nuclearOption
 } | ConvertTo-Json -Depth 3 | Set-Content -Encoding UTF8 $configPath
+
+# ---------- Self-elevation for task creation ----------
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+if ($installWatcher -and -not (Test-IsAdmin)) {
+    Write-Host 'Scheduling your background watcher requires admin rights.'
+    Write-Host 'Relaunching elevated…'
+    $cmd = "-NoProfile -ExecutionPolicy Bypass -File `"$MyInvocation.MyCommand.Path`""
+    Start-Process powershell.exe -Verb RunAs -ArgumentList $cmd
+    exit
+}
 
 # ---------- Create fix.ps1 (single-shot) ----------
 $fixTemplate = @'
@@ -157,17 +171,35 @@ while ($true) {
 '@
 $watchTemplate | Set-Content -Encoding UTF8 $watchScript
 
-# ---------- Create kill-watch.ps1 ----------
+# ---------- Create kill-watch.ps1 (stop only processes) ----------
 $killTemplate = @'
 param()
-# Unregister scheduled task
-Unregister-ScheduledTask -TaskName 'EnforcePreferredAudio' -Confirm:$false -ErrorAction SilentlyContinue
-# Stop any running watch processes
+# Stop any running watch processes started by the Watch Audio shortcut
 Get-Process -Name powershell -ErrorAction SilentlyContinue |
-  Where-Object { $_.StartInfo.Arguments -match 'watch.ps1' } |
-  Stop-Process -Force
+  Where-Object { $_.StartInfo.Arguments -match 'watch\.ps1' } |
+  Stop-Process -Force -ErrorAction SilentlyContinue
+Write-Host 'Audio watcher processes stopped.'
 '@
 $killTemplate | Set-Content -Encoding UTF8 $killScript
+
+# ---------- Create remove-task.ps1 (requires elevation) ----------
+$removeTemplate = @'
+param()
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+if (-not (Test-IsAdmin)) {
+    Write-Host 'Removing scheduled task requires admin rights.'
+    Write-Host 'Relaunching elevated…'
+    $cmd = "-NoProfile -ExecutionPolicy Bypass -File `"$MyInvocation.MyCommand.Path`""
+    Start-Process powershell.exe -Verb RunAs -ArgumentList $cmd
+    exit
+}
+Unregister-ScheduledTask -TaskName 'EnforcePreferredAudio' -Confirm:$false -ErrorAction SilentlyContinue
+Write-Host 'Scheduled task.EnforcePreferredAudio removed.'
+'@
+$removeTemplate | Set-Content -Encoding UTF8 $removeScript
 
 # ---------- Schedule watcher or shortcuts ----------
 $taskName = 'EnforcePreferredAudio'
@@ -202,6 +234,14 @@ $linkKill = $shell.CreateShortcut((Join-Path $smFolder 'Kill Watcher.lnk'))
 $linkKill.TargetPath = 'powershell.exe'
 $linkKill.Arguments  = "-NoProfile -ExecutionPolicy Bypass -File `"$killScript`""
 $linkKill.Save()
+
+# Remove Scheduled Task shortcut (only if watcher installed)
+if ($installWatcher) {
+    $linkRemove = $shell.CreateShortcut((Join-Path $smFolder 'Remove Scheduled Task.lnk'))
+    $linkRemove.TargetPath = 'powershell.exe'
+    $linkRemove.Arguments  = "-NoProfile -ExecutionPolicy Bypass -File `"$removeScript`""
+    $linkRemove.Save()
+}
 
 # ---------- Summary ----------
 Write-Host "Setup complete. Shortcuts placed in Start Menu > Programs > ListenHereYouLittle"
